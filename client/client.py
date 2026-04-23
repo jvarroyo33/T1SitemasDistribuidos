@@ -1,109 +1,148 @@
-# client/capture.py
-import threading
-import queue
-import time
+# client/client.py
 import logging
-import numpy as np
+import threading
+import time
+import queue
+import sys
+import os
 
+# Adiciona o diretório raiz ao path para importações
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from identity.session import Session
+from client.capture import CaptureManager
+from client.sender import Sender
+from client.receiver import Receiver
+from client.ui import UI
+from media.video_codec import decode_frame
+from media.audio_codec import RATE, CHANNELS, CHUNK
+
+# Configuração de log
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-# Importação condicional do pyaudio (pode não ter microfone no ambiente)
 try:
     import pyaudio
     AUDIO_OK = True
 except ImportError:
     AUDIO_OK = False
-    log.warning("[CAPTURE] pyaudio não disponível — áudio desativado")
 
-try:
-    import cv2
-    VIDEO_OK = True
-except ImportError:
-    VIDEO_OK = False
-    log.warning("[CAPTURE] opencv não disponível — vídeo desativado")
+class VideoConferenceClient:
+    def __init__(self, nome, sala):
+        self.session = Session(nome, sala)
+        self.ui = UI()
+        
+        self.video_send_q = queue.Queue(maxsize=10)
+        self.audio_send_q = queue.Queue(maxsize=50)
+        
+        self.capture = CaptureManager(self.video_send_q, self.audio_send_q)
+        self.sender = None
+        self.receiver = None
+        
+        self.running = False
+        
+        # Audio Playback
+        if AUDIO_OK:
+            self.pa = pyaudio.PyAudio()
+            self.audio_stream = self.pa.open(
+                format=pyaudio.paInt16,
+                channels=CHANNELS,
+                rate=RATE,
+                output=True,
+                frames_per_buffer=CHUNK
+            )
+        else:
+            self.audio_stream = None
 
-from media.audio_codec import RATE, CHANNELS, CHUNK
-from media.video_codec import encode_frame
+    def on_video_received(self, data):
+        try:
+            frame = decode_frame(data)
+            self.ui.display_video(frame)
+        except Exception as e:
+            log.error(f"Erro decod vídeo: {e}")
 
+    def on_audio_received(self, data):
+        if self.audio_stream:
+            try:
+                self.audio_stream.write(data)
+            except Exception as e:
+                log.error(f"Erro audio playback: {e}")
 
-class CaptureManager:
-    """
-    Gerencia captura de câmera e microfone em threads separadas.
-    Produz frames/audio em filas para o Sender consumir.
-    """
+    def on_text_received(self, text):
+        print(f"\n[CHAT] {text}")
+        print("Mensagem: ", end="", flush=True)
 
-    def __init__(self, video_queue: queue.Queue, audio_queue: queue.Queue):
-        self.video_q   = video_queue
-        self.audio_q   = audio_queue
-        self._running  = False
-        self._threads  = []
-
-    # ------------------------------------------------------------------
-    # Vídeo
-    # ------------------------------------------------------------------
-    def _capture_video(self):
-        if not VIDEO_OK:
-            return
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            log.error("[CAPTURE] Câmera não encontrada")
-            return
-        log.info("[CAPTURE] Câmera iniciada")
-        while self._running:
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.01)
+    def _send_loop(self):
+        while self.running:
+            if not self.session.online or not self.sender:
+                time.sleep(0.1)
                 continue
+            
+            # Prioridade Texto (verificado no input da main)
+            
+            # Vídeo
             try:
-                data = encode_frame(frame)
-                # Descarta frame antigo se fila cheia (QoS: drop)
-                if self.video_q.full():
-                    self.video_q.get_nowait()
-                self.video_q.put_nowait(data)
-            except Exception as e:
-                log.error(f"[CAPTURE] Erro vídeo: {e}")
-        cap.release()
-        log.info("[CAPTURE] Câmera encerrada")
-
-    # ------------------------------------------------------------------
-    # Áudio
-    # ------------------------------------------------------------------
-    def _capture_audio(self):
-        if not AUDIO_OK:
-            return
-        pa = pyaudio.PyAudio()
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            frames_per_buffer=CHUNK,
-        )
-        log.info("[CAPTURE] Microfone iniciado")
-        while self._running:
+                while not self.video_send_q.empty():
+                    data = self.video_send_q.get_nowait()
+                    self.sender.send_video(data)
+            except: pass
+            
+            # Áudio
             try:
-                pcm = stream.read(CHUNK, exception_on_overflow=False)
-                if self.audio_q.full():
-                    self.audio_q.get_nowait()
-                self.audio_q.put_nowait(pcm)
-            except Exception as e:
-                log.error(f"[CAPTURE] Erro áudio: {e}")
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
-        log.info("[CAPTURE] Microfone encerrado")
+                while not self.audio_send_q.empty():
+                    data = self.audio_send_q.get_nowait()
+                    self.sender.send_audio(data)
+            except: pass
+            
+            time.sleep(0.01)
 
-    # ------------------------------------------------------------------
-    # Start / stop
-    # ------------------------------------------------------------------
     def start(self):
-        self._running = True
-        tv = threading.Thread(target=self._capture_video, daemon=True, name="capture-video")
-        ta = threading.Thread(target=self._capture_audio, daemon=True, name="capture-audio")
-        self._threads = [tv, ta]
-        for t in self._threads:
-            t.start()
+        if not self.session.login():
+            log.error("Falha inicial de login. Encerrando.")
+            return
+
+        self.running = True
+        self.sender = Sender(self.session.context, self.session.broker_info)
+        self.receiver = Receiver(self.session.context, self.session.broker_info,
+                                 self.on_video_received, self.on_audio_received, self.on_text_received)
+        
+        self.receiver.start()
+        self.capture.start()
+        self.ui.start()
+        
+        threading.Thread(target=self._send_loop, daemon=True).start()
+        
+        log.info("Cliente iniciado com sucesso!")
+        
+        # Loop de chat no terminal
+        try:
+            while self.running:
+                msg = input("Mensagem (ou '/sair'): ")
+                if msg == "/sair":
+                    break
+                if self.sender:
+                    self.sender.send_text(msg, self.session.user_id)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.stop()
 
     def stop(self):
-        self._running = False
-        log.info("[CAPTURE] Captura encerrada")
+        self.running = False
+        self.capture.stop()
+        if self.sender: self.sender.stop()
+        if self.receiver: self.receiver.stop()
+        self.ui.stop()
+        self.session.logout()
+        if self.audio_stream:
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+            self.pa.terminate()
+        log.info("Cliente encerrado.")
+
+if __name__ == "__main__":
+    nome = input("Seu nome: ") or "User"
+    sala = input("Sala (A-K): ").upper() or "A"
+    
+    client = VideoConferenceClient(nome, sala)
+    client.start()
