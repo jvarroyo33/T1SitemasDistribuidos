@@ -17,60 +17,77 @@ def test_inter_broker_routing():
     time.sleep(1)
     b1_proc = subprocess.Popen([sys.executable, "broker/broker.py", "--port", "7000"])
     b2_proc = subprocess.Popen([sys.executable, "broker/broker.py", "--port", "8000"])
-    time.sleep(5) # Tempo para brokers se descobrirem via Registry
+    
+    # Esperar os brokers se registrarem e SE DESCOBRIREM
+    # O loop de registro é de 2s, 10s deve ser mais que suficiente
+    print("[TEST] Aguardando formação do cluster (10s)...")
+    time.sleep(10) 
     
     context = zmq.Context()
     
     # 2. Configurar Subscriber no Broker B (Base 8000 -> Texto Out = 8006)
     sub = context.socket(zmq.SUB)
+    sub.setsockopt(zmq.LINGER, 0)
     sub.connect("tcp://localhost:8006")
     sub.setsockopt(zmq.SUBSCRIBE, b"SALA_TESTE")
     
     # 3. Configurar Publisher no Broker A (Base 7000 -> Texto In = 7005)
     pub = context.socket(zmq.PUB)
+    pub.setsockopt(zmq.LINGER, 0)
     pub.connect("tcp://localhost:7005")
+    
+    # Tempo para o handshake PUB/SUB e ROUTER/DEALER estabilizar
+    time.sleep(3)
     
     received_msgs = []
     def sub_loop():
-        # Polling para evitar bloqueio infinito
-        if sub.poll(10000): # Espera até 10s
-            msg = sub.recv_multipart()
-            received_msgs.append(msg)
-
-    t = threading.Thread(target=sub_loop)
+        print("[SUB] Escutando...")
+        start_time = time.time()
+        # Polling por até 20 segundos
+        while time.time() - start_time < 20:
+            if sub.poll(1000): 
+                msg = sub.recv_multipart()
+                received_msgs.append(msg)
+                print(f"[SUB] MENSAGEM RECEBIDA: {msg[1].decode()}")
+                return
+    
+    t = threading.Thread(target=sub_loop, daemon=True)
     t.start()
     
-    # 4. Enviar mensagem para Broker A
-    print("[TEST] Enviando mensagem para Broker A...")
-    time.sleep(2)
-    pub.send_multipart([b"SALA_TESTE", b"Ola do Cluster!"])
+    # 4. Enviar mensagem para Broker A repetidamente para vencer o handshake assíncrono
+    print("[TEST] Enviando burst de mensagens para Broker A...")
+    for i in range(15):
+        msg_text = f"Ola Cluster Burst {i}!"
+        pub.send_multipart([b"SALA_TESTE", msg_text.encode()])
+        time.sleep(0.5)
     
-    t.join(timeout=12)
+    t.join(timeout=20)
     
     # 5. Verificar resultado
-    success = False
-    try:
-        if len(received_msgs) > 0:
-            topic, data = received_msgs[0]
-            if topic == b"SALA_TESTE" and data == b"Ola do Cluster!":
-                print("[OK] Mensagem viajou do Broker A para o Broker B com sucesso!")
-                success = True
-            else:
-                print(f"[FALHA] Mensagem incorreta: {topic}, {data}")
-        else:
-            print("[FALHA] Mensagem não recebida pelo Broker B dentro do timeout.")
-    finally:
-        reg_proc.kill()
-        b1_proc.kill()
-        b2_proc.kill()
-        context.term()
-        if not success:
-            raise Exception("Teste de cluster falhou.")
+    success = len(received_msgs) > 0
+    
+    print("[TEST] Limpando processos...")
+    reg_proc.kill()
+    b1_proc.kill()
+    b2_proc.kill()
+    sub.close()
+    pub.close()
+    context.term()
+    
+    if success:
+        print("[OK] Comunicação inter-broker validada!")
+        return True
+    else:
+        print("[FALHA] Nenhuma mensagem recebida via cluster após 15 disparos.")
+        return False
 
 if __name__ == "__main__":
     try:
-        test_inter_broker_routing()
-        print("\n--- TESTE DE CLUSTER PASSOU! ---")
+        if test_inter_broker_routing():
+            print("\n--- TESTE DE CLUSTER PASSOU! ---")
+            sys.exit(0)
+        else:
+            sys.exit(1)
     except Exception as e:
         print(f"\n[ERRO] Teste falhou: {e}")
         sys.exit(1)

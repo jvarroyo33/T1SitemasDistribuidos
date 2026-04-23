@@ -15,7 +15,7 @@ O Registry atua como o "cérebro" da topologia, permitindo que o sistema seja di
 Múltiplos brokers cooperam para distribuir mídia em escala global.
 - **Inter-Broker Mesh**: Utiliza o padrão `ROUTER/DEALER` para criar uma malha de comunicação. Cada broker é conectado aos seus pares.
 - **Roteamento Inteligente**: Mensagens recebidas de clientes locais são marcadas com o `broker_id` de origem e propagadas para o cluster. Brokers receptores validam o ID para evitar loops infinitos de mensagens.
-- **Distribuição Híbrida**: Utiliza `XSUB/XPUB` para o padrão *Publisher-Subscriber* local, garantindo que apenas interessados em determinadas salas recebam os dados.
+- **Distribuição Híbrida**: Utiliza `SUB/PUB` para o padrão *Publisher-Subscriber* local, garantindo que apenas interessados em determinadas salas recebam os dados.
 - **Portas Dinâmicas**: Cada broker utiliza uma faixa de portas baseada em um deslocamento (`base_port + N`), evitando conflitos em execuções locais.
 
 ### 1.3 Cliente (Multithreaded)
@@ -32,7 +32,7 @@ Aplicação modular que separa as preocupações de captura, rede e interface.
 | :--- | :--- | :--- |
 | **Descoberta** | `REQ/REP` | Síncrono e confiável para registro de serviços. |
 | **Controle/HB** | `REQ/REP` | Utilizado para login, estatísticas e batimentos cardíacos. |
-| **Mídia Local** | `XSUB/XPUB` | Padrão Pub/Sub eficiente que permite interceptação e roteamento. |
+| **Mídia Local** | `SUB/PUB` | Padrão Pub/Sub eficiente que permite interceptação e roteamento. |
 | **Malha Cluster** | `ROUTER/DEALER` | Essencial para comunicação assíncrona bidirecional entre brokers. |
 
 ---

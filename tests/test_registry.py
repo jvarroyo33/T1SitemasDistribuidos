@@ -24,9 +24,12 @@ def test_registry_flow():
         # 2. Testar registro de broker
         print("[TEST] Registrando broker fictício...")
         reg_sock.send_json({"action": "register", "address": "localhost:9999"})
-        resp = reg_sock.recv_json()
-        assert resp["status"] == "ok"
-        print("[OK] Broker registrado com sucesso.")
+        if reg_sock.poll(2000):
+            resp = reg_sock.recv_json()
+            assert resp["status"] == "ok"
+            print("[OK] Broker registrado com sucesso.")
+        else:
+            raise Exception("Timeout esperando resposta do Registry")
         
         # 3. Testar listagem de brokers
         print("[TEST] Solicitando lista de brokers...")
@@ -41,15 +44,21 @@ def test_registry_flow():
         resp = reg_sock.recv_json()
         assert resp["address"] == "localhost:9999"
         print(f"[OK] Cliente recebeu broker correto: {resp['address']}")
+        return True
         
     finally:
-        registry_proc.terminate()
+        print("[TEST] Finalizando processos do teste 1...")
+        reg_sock.close()
+        registry_proc.kill()
         context.term()
 
 if __name__ == "__main__":
     try:
-        test_registry_flow()
-        print("\n--- TESTE DE REGISTRO PASSOU! ---")
+        if test_registry_flow():
+            print("\n--- TESTE DE REGISTRO PASSOU! ---")
+            sys.exit(0)
+        else:
+            sys.exit(1)
     except Exception as e:
         print(f"\n[ERRO] Teste falhou: {e}")
         sys.exit(1)
