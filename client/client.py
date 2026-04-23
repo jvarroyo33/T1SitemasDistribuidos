@@ -10,10 +10,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from identity.session import Session
-from client.capture import CaptureManager
-from client.sender import Sender
-from client.receiver import Receiver
-from client.ui import UI
+from capture import CaptureManager
+from sender import Sender
+from receiver import Receiver
+from ui import UI
 from media.video_codec import decode_frame
 from media.audio_codec import RATE, CHANNELS, CHUNK
 
