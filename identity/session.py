@@ -62,6 +62,7 @@ class Session:
             })
             resp = self.ctrl_sock.recv_json()
             if resp.get("status") == "ok":
+                resp['sala'] = self.sala
                 self.broker_info = resp
                 self.online = True
                 self._start_heartbeat()

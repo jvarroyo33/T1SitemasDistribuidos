@@ -1,10 +1,10 @@
-# client/client.py
 import logging
 import threading
 import time
 import queue
 import sys
 import os
+import argparse
 
 # Adiciona o diretório raiz ao path para importações
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,9 +28,10 @@ except ImportError:
     AUDIO_OK = False
 
 class VideoConferenceClient:
-    def __init__(self, nome, sala):
+    def __init__(self, nome, sala, use_camera=True):
         self.session = Session(nome, sala)
         self.ui = UI()
+        self.use_camera = use_camera
         
         self.video_send_q = queue.Queue(maxsize=10)
         self.audio_send_q = queue.Queue(maxsize=50)
@@ -107,7 +108,12 @@ class VideoConferenceClient:
                                  self.on_video_received, self.on_audio_received, self.on_text_received)
         
         self.receiver.start()
-        self.capture.start()
+        
+        if self.use_camera:
+            self.capture.start()
+        else:
+            log.info("[CLIENTE] Modo sem câmera ativado — vídeo NÃO será capturado")
+        
         self.ui.start()
         
         threading.Thread(target=self._send_loop, daemon=True).start()
@@ -129,7 +135,8 @@ class VideoConferenceClient:
 
     def stop(self):
         self.running = False
-        self.capture.stop()
+        if self.use_camera:
+            self.capture.stop()
         if self.sender: self.sender.stop()
         if self.receiver: self.receiver.stop()
         self.ui.stop()
@@ -141,8 +148,18 @@ class VideoConferenceClient:
         log.info("Cliente encerrado.")
 
 if __name__ == "__main__":
-    nome = input("Seu nome: ") or "User"
-    sala = input("Sala (A-K): ").upper() or "A"
+    parser = argparse.ArgumentParser(description="Cliente de Videoconferência")
+    parser.add_argument("--no-camera", action="store_true", dest="no_camera",
+                        help="Inicia sem capturar vídeo da webcam")
+    parser.add_argument("--nome", type=str, default=None,
+                        help="Seu nome de exibição")
+    parser.add_argument("--sala", type=str, default=None,
+                        help="Sala (A-K)")
+    args = parser.parse_args()
     
-    client = VideoConferenceClient(nome, sala)
+    nome = args.nome or input("Seu nome: ") or "User"
+    sala = (args.sala or input("Sala (A-K): ") or "A").upper()
+    
+    client = VideoConferenceClient(nome, sala, use_camera=not args.no_camera)
     client.start()
+
