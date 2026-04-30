@@ -95,7 +95,12 @@ class VideoConferenceClient:
             time.sleep(0.01)
 
     def on_video_received(self, data):
-        self.ui.add_video_frame(data)
+        try:
+            from media.video_codec import decode_frame
+            frame = decode_frame(data)
+            self.ui.display_video(frame)
+        except Exception as e:
+            log.error(f"Erro decod vídeo: {e}")
 
     def on_audio_received(self, data):
         if self.audio_stream:
@@ -104,8 +109,9 @@ class VideoConferenceClient:
             except Exception as e:
                 log.error(f"Erro audio playback: {e}")
 
-    def on_text_received(self, msg):
-        self.ui.add_chat_message(msg)
+    def on_text_received(self, text):
+        print(f"\n[CHAT] {text}")
+        print("Mensagem (ou '/sair'): ", end="", flush=True)
 
     def send_chat(self, text):
         if not self.text_send_q.full():
