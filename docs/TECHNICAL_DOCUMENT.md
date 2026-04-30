@@ -115,22 +115,53 @@ Para validar a complexidade do sistema distribuído, foi desenvolvida uma suíte
 
 ---
 
-## 5. Instruções de Execução
+## 5. Instalação e Execução
 
-### Pré-requisitos
+### 5.1 Instalação de Dependências
+O projeto requer Python 3.8+ e algumas bibliotecas específicas. 
+Para instalar todas as dependências, abra um terminal na raiz do projeto e execute:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### Passo a Passo
-1. **Registry**: `python discovery/registry.py`
-2. **Brokers** (Abra quantos desejar em portas diferentes):
-   - `python broker/broker.py --port 7000`
-   - `python broker/broker.py --port 8000`
-3. **Clientes**: `python client/client.py`
+> **Nota para Windows**: Se o `PyAudio` der erro de compilação durante a instalação, você pode baixar o arquivo `.whl` pré-compilado adequado para sua versão do Python em sites como o de Christoph Gohlke ou instalar via `conda install pyaudio`.
+
+### 5.2 Execução Local (Mesma Máquina)
+1. **Registry**: 
+   ```bash
+   python discovery/registry.py
+   ```
+2. **Brokers** (Abra quantos desejar em terminais diferentes):
+   ```bash
+   python broker/broker.py --port 7000
+   python broker/broker.py --port 8000
+   ```
+3. **Clientes**: 
+   ```bash
+   python client/client.py
+   ```
    - Informe seu nome e a sala (ex: `A`) para entrar no chat.
-   - Uma janela de vídeo abrirá automaticamente exibindo sua câmera (ou um placeholder caso esteja em uso).
-   - Use o terminal para digitar mensagens. Digite `/sair` para encerrar.
+   - Pressione **Enter** quando pedir o IP do Servidor para conectar no `localhost`.
+   - Uma janela de vídeo abrirá. Use o terminal para enviar textos. Digite `/sair` para encerrar.
+
+### 5.3 Execução em Rede Local (LAN entre PCs diferentes)
+Para comunicação entre computadores diferentes na mesma rede Wi-Fi/cabo:
+
+**No Computador Servidor (Ex: IP `192.168.1.50`):**
+1. **Registry**: `python discovery/registry.py`
+2. **Brokers** (Anuncie o IP do servidor para a rede):
+   ```bash
+   python broker/broker.py --port 7000 --host 192.168.1.50
+   python broker/broker.py --port 8000 --host 192.168.1.50
+   ```
+
+**Nos Computadores Clientes:**
+1. Inicie o cliente:
+   ```bash
+   python client/client.py
+   ```
+2. Quando perguntado, insira o **IP do Servidor** (`192.168.1.50`). Os clientes buscarão o Registry na rede e farão toda a negociação de comunicação e vídeo remotamente!
 
 ---
 **Equipe**: Enzo Dezem Alves RA: 801743 , Joao Vitor T. Arroyo 814135 ,João Lucas Gomes Pelegrino  RA: 822033,Felipe  Penteado - 831439, Levir de Oliveira - 790285
