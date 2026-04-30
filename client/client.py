@@ -37,7 +37,7 @@ class VideoConferenceClient:
         self.text_send_q  = queue.Queue(maxsize=10)
         
         self.capture = CaptureManager(self.video_send_q, self.audio_send_q)
-        self.ui = UI(self.capture, nome, self._on_ui_close)
+        self.ui = UI(capture_manager=self.capture)
         self.sender = None
         self.receiver = None
         
