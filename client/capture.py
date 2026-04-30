@@ -43,37 +43,57 @@ class CaptureManager:
     def _capture_video(self):
         if not VIDEO_OK:
             return
+            
+        import os
+        os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0" # Silencia avisos internos do OpenCV
+        
         cap = cv2.VideoCapture(0)
+        camera_error = False
+        
         if not cap.isOpened():
-            log.error("[CAPTURE] Câmera não encontrada")
-            return
-        log.info("[CAPTURE] Câmera iniciada")
+            log.warning("[CAPTURE] Câmera em uso ou não encontrada. Usando placeholder.")
+            camera_error = True
+        
+        log.info("[CAPTURE] Thread de vídeo iniciada")
+        
+        # Frame de fallback caso a câmera esteja ocupada
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(placeholder, "Camera em uso / Bloqueada", (100, 240), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+        error_count = 0
         while self._running:
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.01)
-                continue
+            if not camera_error:
+                ok, frame = cap.read()
+                if not ok:
+                    error_count += 1
+                    if error_count > 10: # Se falhar muito, desiste e usa placeholder
+                        camera_error = True
+                        cap.release()
+                    time.sleep(0.1)
+                    continue
+                error_count = 0
+            else:
+                frame = placeholder
+                time.sleep(0.1) # Reduz CPU para o placeholder
+
             try:
-                # QoS Adaptativo: Se a fila estiver enchendo, reduz a qualidade/resolução
+                # QoS Adaptativo
                 q_size = self.video_q.qsize()
-                if q_size > 7:
-                    quality = 15 # Muito baixa + Resize
-                elif q_size > 4:
-                    quality = 30 # Média-baixa
-                else:
-                    quality = 60 # Normal/Boa
+                quality = 15 if q_size > 7 else (30 if q_size > 4 else 60)
                 
                 data = encode_frame(frame, quality=quality)
                 
-                # Descarta frame antigo se fila cheia (Drop QoS)
                 if self.video_q.full():
                     try: self.video_q.get_nowait()
                     except: pass
                 self.video_q.put_nowait(data)
             except Exception as e:
                 log.error(f"[CAPTURE] Erro vídeo: {e}")
-        cap.release()
-        log.info("[CAPTURE] Câmera encerrada")
+                
+        if cap.isOpened():
+            cap.release()
+        log.info("[CAPTURE] Thread de vídeo encerrada")
 
     # ------------------------------------------------------------------
     # Áudio
