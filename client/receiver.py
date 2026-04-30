@@ -35,8 +35,13 @@ class Receiver:
         while self.running:
             try:
                 if self.v_sock.poll(500):
-                    topic, data = self.v_sock.recv_multipart()
-                    self.on_video(data)
+                    msg = self.v_sock.recv_multipart()
+                    if len(msg) == 3:
+                        topic, user_id, data = msg
+                        self.on_video(user_id.decode(), data)
+                    elif len(msg) == 2:
+                        topic, data = msg
+                        self.on_video("Desconhecido", data)
             except: break
 
     def _loop_audio(self):

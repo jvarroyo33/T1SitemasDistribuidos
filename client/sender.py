@@ -31,8 +31,8 @@ class Sender:
         self.running = False
         self.sala = broker_info.get("sala", "A")
 
-    def send_video(self, data):
-        self.v_sock.send_multipart([self.sala.encode(), data])
+    def send_video(self, data, user_id):
+        self.v_sock.send_multipart([self.sala.encode(), user_id.encode(), data])
 
     def send_audio(self, data):
         self.a_sock.send_multipart([self.sala.encode(), data])

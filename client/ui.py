@@ -8,17 +8,13 @@ log = logging.getLogger(__name__)
 
 class UI:
     def __init__(self, capture_manager=None):
-        self.video_q = queue.Queue(maxsize=10)
+        self.frames = {}
         self._running = False
         self.capture = capture_manager
         self.win_name = "Videoconferência"
 
-    def display_video(self, frame):
-        try:
-            if self.video_q.full():
-                self.video_q.get_nowait()
-            self.video_q.put_nowait(frame)
-        except: pass
+    def display_video(self, user_id, frame):
+        self.frames[user_id] = frame
 
     def _on_mouse(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and self.capture:
@@ -51,23 +47,40 @@ class UI:
         cv2.putText(frame, v_txt, (135, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     def _render_loop(self):
+        import numpy as np
         log.info("[UI] Renderizador de vídeo iniciado")
         cv2.namedWindow(self.win_name)
         cv2.setMouseCallback(self.win_name, self._on_mouse)
         
         while self._running:
             try:
-                frame = self.video_q.get(timeout=0.05)
-                self._draw_controls(frame)
-                cv2.imshow(self.win_name, frame)
-            except queue.Empty:
-                pass
+                if not self.frames:
+                    # Tela preta se não houver vídeo ainda
+                    display_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(display_frame, "Aguardando video...", (180, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                else:
+                    user_ids = list(self.frames.keys())
+                    user_frames = list(self.frames.values())
+                    
+                    resized_frames = []
+                    for uid, f in zip(user_ids, user_frames):
+                        # Garantir que todos tenham a mesma altura (480)
+                        f_resized = cv2.resize(f, (640, 480))
+                        # Escrever o nome do usuário no vídeo
+                        cv2.putText(f_resized, uid, (10, 450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                        resized_frames.append(f_resized)
+                    
+                    # Concatena horizontalmente (lado a lado)
+                    display_frame = np.hstack(resized_frames)
+                
+                self._draw_controls(display_frame)
+                cv2.imshow(self.win_name, display_frame)
             except Exception as e:
                 log.error(f"[UI] Erro render: {e}")
                 break
                 
-            # OpenCV EXIGE que o waitKey seja chamado para não dar "Não responde"
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            # OpenCV EXIGE que o waitKey seja chamado para processar os eventos da janela
+            if cv2.waitKey(30) & 0xFF == ord('q'):
                 break
         cv2.destroyAllWindows()
 

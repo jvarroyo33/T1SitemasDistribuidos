@@ -84,7 +84,7 @@ class VideoConferenceClient:
         while self.running:
             try:
                 if not self.video_send_q.empty():
-                    self.sender.send_video(self.video_send_q.get())
+                    self.sender.send_video(self.video_send_q.get(), self.session.nome)
                 if not self.audio_send_q.empty():
                     self.sender.send_audio(self.audio_send_q.get())
                 if not self.text_send_q.empty():
@@ -94,11 +94,11 @@ class VideoConferenceClient:
             import time
             time.sleep(0.01)
 
-    def on_video_received(self, data):
+    def on_video_received(self, user_id, data):
         try:
             from media.video_codec import decode_frame
             frame = decode_frame(data)
-            self.ui.display_video(frame)
+            self.ui.display_video(user_id, frame)
         except Exception as e:
             log.error(f"Erro decod vídeo: {e}")
 
