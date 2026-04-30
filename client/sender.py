@@ -11,7 +11,7 @@ class Sender:
     def __init__(self, context, broker_info):
         self.context = context
         self.broker_info = broker_info
-        self.host = "localhost" # Simplificação
+        self.host = broker_info.get("host", "localhost")
         
         # Vídeo e áudio: PUB (não-bloqueante, perder frame é OK para mídia)
         self.v_sock = self.context.socket(zmq.PUB)

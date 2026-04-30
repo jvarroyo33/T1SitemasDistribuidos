@@ -28,15 +28,16 @@ except ImportError:
     AUDIO_OK = False
 
 class VideoConferenceClient:
-    def __init__(self, nome, sala, use_camera=True):
-        self.session = Session(nome, sala, on_reconnect=self._on_broker_reconnect)
+    def __init__(self, nome, sala, use_camera=True, registry_host="localhost"):
+        self.session = Session(nome, sala, on_reconnect=self._on_broker_reconnect, registry_host=registry_host)
         self.use_camera = use_camera
         
         self.video_send_q = queue.Queue(maxsize=10)
         self.audio_send_q = queue.Queue(maxsize=50)
+        self.text_send_q  = queue.Queue(maxsize=10)
         
-        self.capture = CaptureManager(self.video_send_q, self.audio_send_q)
-        self.ui = UI(capture_manager=self.capture)
+        self.capture = CaptureManager(self.video_send_q, self.audio_send_q, use_camera)
+        self.ui = UI(self.capture, nome, self._on_ui_close)
         self.sender = None
         self.receiver = None
         
@@ -55,79 +56,72 @@ class VideoConferenceClient:
         else:
             self.audio_stream = None
 
-    def on_video_received(self, data):
-        try:
-            frame = decode_frame(data)
-            self.ui.display_video(frame)
-        except Exception as e:
-            log.error(f"Erro decod vídeo: {e}")
+    def start(self):
+        if not self.session.login():
+            log.error("Nenhum broker encontrado.")
+            return
 
-    def on_audio_received(self, data):
-        if self.audio_stream:
-            try:
-                self.audio_stream.write(data)
-            except Exception as e:
-                log.error(f"Erro audio playback: {e}")
+        # self.session.broker_info contém o 'host' retornado pelo broker
+        self.sender = Sender(self.session.context, self.session.broker_info)
+        self.receiver = Receiver(
+            self.session.context, self.session.broker_info,
+            self.on_video_received, self.on_audio_received, self.on_text_received
+        )
 
-    def on_text_received(self, text):
-        print(f"\n[CHAT] {text}")
-        print("Mensagem: ", end="", flush=True)
+        self.running = True
+        self.capture.start()
+        self.receiver.start()
+        threading.Thread(target=self._send_loop, daemon=True).start()
+        log.info("Cliente iniciado com sucesso!")
+        
+        self.ui.start() # Bloqueia aqui
+
+    def _on_ui_close(self):
+        self.stop()
 
     def _send_loop(self):
         while self.running:
-            if not self.session.online or not self.sender:
-                time.sleep(0.1)
-                continue
-            
-            # Prioridade Texto (verificado no input da main)
-            
-            # Vídeo
             try:
-                while not self.video_send_q.empty():
-                    data = self.video_send_q.get_nowait()
-                    self.sender.send_video(data)
-            except: pass
-            
-            # Áudio
-            try:
-                while not self.audio_send_q.empty():
-                    data = self.audio_send_q.get_nowait()
-                    self.sender.send_audio(data)
-            except: pass
-            
+                if not self.video_send_q.empty():
+                    self.sender.send_video(self.video_send_q.get())
+                if not self.audio_send_q.empty():
+                    self.sender.send_audio(self.audio_send_q.get())
+                if not self.text_send_q.empty():
+                    self.sender.send_text(self.text_send_q.get(), self.session.nome)
+            except Exception as e:
+                log.error(f"[CLIENTE] Erro no send_loop: {e}")
+            import time
             time.sleep(0.01)
+    def on_video_received(self, data):
+        self.ui.add_video_frame(data)
 
-    def start(self):
-        if not self.session.login():
-            log.error("Falha inicial de login. Encerrando.")
-            return
+    def on_audio_received(self, data):
+        self.ui.play_audio(data)
 
-        self.running = True
-        self.sender = Sender(self.session.context, self.session.broker_info)
-        self.receiver = Receiver(self.session.context, self.session.broker_info,
-                                 self.on_video_received, self.on_audio_received, self.on_text_received)
-        
-        self.receiver.start()
-        
-        if self.use_camera:
-            self.capture.start()
-        else:
-            log.info("[CLIENTE] Modo sem câmera ativado — vídeo NÃO será capturado")
-        
-        self.ui.start()
-        
-        threading.Thread(target=self._send_loop, daemon=True).start()
-        
-        log.info("Cliente iniciado com sucesso!")
-        
-        # Loop de chat no terminal
-        try:
-            while self.running:
-                msg = input("Mensagem (ou '/sair'): ")
-                if msg == "/sair":
+    def on_text_received(self, msg):
+        self.ui.add_chat_message(msg)
+
+    def send_chat(self, text):
+        if not self.text_send_q.full():
+            self.text_send_q.put(text)
+
+    def terminal_chat_loop(self):
+        while self.running:
+            try:
+                txt = input("Mensagem (ou '/sair'): ")
+                if txt == "/sair":
+                    self.stop()
                     break
-                if self.sender:
-                    self.sender.send_text(msg, self.session.user_id)
+                if txt:
+                    self.send_chat(txt)
+            except EOFError:
+                break
+        self.stop()
+
+    def run_interactive(self):
+        threading.Thread(target=self.terminal_chat_loop, daemon=True).start()
+        try:
+            self.start()
         except KeyboardInterrupt:
             pass
         finally:
@@ -157,14 +151,11 @@ class VideoConferenceClient:
         self.running = False
         if self.use_camera:
             self.capture.stop()
-        if self.sender: self.sender.stop()
-        if self.receiver: self.receiver.stop()
-        self.ui.stop()
+        if self.sender:
+            self.sender.stop()
+        if self.receiver:
+            self.receiver.stop()
         self.session.logout()
-        if self.audio_stream:
-            self.audio_stream.stop_stream()
-            self.audio_stream.close()
-            self.pa.terminate()
         log.info("Cliente encerrado.")
 
 if __name__ == "__main__":
@@ -175,11 +166,14 @@ if __name__ == "__main__":
                         help="Seu nome de exibição")
     parser.add_argument("--sala", type=str, default=None,
                         help="Sala (A-K)")
+    parser.add_argument("--registry", type=str, default=None,
+                        help="IP do Registry (ex: 192.168.1.10)")
     args = parser.parse_args()
     
     nome = args.nome or input("Seu nome: ") or "User"
     sala = (args.sala or input("Sala (A-K): ") or "A").upper()
+    registry_ip = args.registry or input("IP do Servidor (Enter para localhost): ") or "localhost"
     
-    client = VideoConferenceClient(nome, sala, use_camera=not args.no_camera)
-    client.start()
+    client = VideoConferenceClient(nome, sala, use_camera=not args.no_camera, registry_host=registry_ip)
+    client.run_interactive()
 

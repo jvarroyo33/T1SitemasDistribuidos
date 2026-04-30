@@ -7,10 +7,9 @@ import threading
 
 log = logging.getLogger(__name__)
 
-REGISTRY_ADDR = "tcp://localhost:5555"
-
 class Session:
-    def __init__(self, nome: str, sala: str = "A", on_reconnect=None):
+    def __init__(self, nome: str, sala: str = "A", on_reconnect=None, registry_host: str = "localhost"):
+        self.registry_addr = f"tcp://{registry_host}:5555"
         self.nome = nome
         self.sala = sala
         self.user_id = f"{nome}_{uuid.uuid4().hex[:4]}"
@@ -29,7 +28,7 @@ class Session:
         """Consulta o registry para obter um broker disponível."""
         reg = self.context.socket(zmq.REQ)
         reg.setsockopt(zmq.RCVTIMEO, 2000)
-        reg.connect(REGISTRY_ADDR)
+        reg.connect(self.registry_addr)
         try:
             reg.send_json({"action": "get_broker"})
             resp = reg.recv_json()
@@ -64,6 +63,7 @@ class Session:
             resp = self.ctrl_sock.recv_json()
             if resp.get("status") == "ok":
                 resp['sala'] = self.sala
+                resp['host'] = host  # Passa o IP real do broker para o Sender/Receiver
                 self.broker_info = resp
                 self.online = True
                 self._start_heartbeat()

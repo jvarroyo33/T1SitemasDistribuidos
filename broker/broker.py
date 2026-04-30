@@ -199,9 +199,11 @@ class Broker:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("--host", type=str, default="localhost", help="IP do broker (ex: 192.168.1.10)")
     parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--registry", type=str, default="tcp://localhost:5555", help="Endereço do registry")
     args = parser.parse_args()
-    b = Broker(base_port=args.port)
+    b = Broker(host=args.host, base_port=args.port, registry_addr=args.registry)
     try:
         b.start()
         while True: time.sleep(1)

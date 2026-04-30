@@ -10,7 +10,7 @@ class Receiver:
     def __init__(self, context, broker_info, on_video, on_audio, on_text):
         self.context = context
         self.broker_info = broker_info
-        self.host = "localhost"
+        self.host = broker_info.get("host", "localhost")
         self.sala = broker_info.get("sala", "A")
         
         self.on_video = on_video
