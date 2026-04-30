@@ -10,11 +10,12 @@ log = logging.getLogger(__name__)
 REGISTRY_ADDR = "tcp://localhost:5555"
 
 class Session:
-    def __init__(self, nome: str, sala: str = "A"):
+    def __init__(self, nome: str, sala: str = "A", on_reconnect=None):
         self.nome = nome
         self.sala = sala
         self.user_id = f"{nome}_{uuid.uuid4().hex[:4]}"
         self.online = False
+        self.on_reconnect = on_reconnect  # Callback chamado quando reconecta
         
         self.context = zmq.Context()
         self.ctrl_sock = None
@@ -99,7 +100,10 @@ class Session:
         while not self.login():
             log.info("Aguardando broker disponível...")
             time.sleep(2)
-        log.info("Reconectado com sucesso!")
+        log.info(f"Reconectado com sucesso! em {self.broker_addr}")
+        # Avisa o cliente para recriar os sockets de mídia no novo broker
+        if self.on_reconnect:
+            self.on_reconnect(self.broker_info)
 
     def logout(self):
         self._running = False

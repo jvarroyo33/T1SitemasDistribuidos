@@ -29,14 +29,14 @@ except ImportError:
 
 class VideoConferenceClient:
     def __init__(self, nome, sala, use_camera=True):
-        self.session = Session(nome, sala)
-        self.ui = UI()
+        self.session = Session(nome, sala, on_reconnect=self._on_broker_reconnect)
         self.use_camera = use_camera
         
         self.video_send_q = queue.Queue(maxsize=10)
         self.audio_send_q = queue.Queue(maxsize=50)
         
         self.capture = CaptureManager(self.video_send_q, self.audio_send_q)
+        self.ui = UI(capture_manager=self.capture)
         self.sender = None
         self.receiver = None
         
@@ -132,6 +132,26 @@ class VideoConferenceClient:
             pass
         finally:
             self.stop()
+
+    def _on_broker_reconnect(self, new_broker_info):
+        """Chamado pela Session quando o failover ocorre. Recria sockets no novo broker."""
+        log.info("[CLIENTE] Recriando sockets de mídia no novo broker...")
+        # Para os sockets antigos sem matar as threads de captura
+        if self.sender:
+            self.sender.stop()
+        if self.receiver:
+            self.receiver.stop()
+        # Pequena pausa para os sockets ZMQ fecharem
+        import time as _time
+        _time.sleep(0.5)
+        # Recria com o novo broker, mantendo a sala original
+        self.sender = Sender(self.session.context, new_broker_info)
+        self.receiver = Receiver(
+            self.session.context, new_broker_info,
+            self.on_video_received, self.on_audio_received, self.on_text_received
+        )
+        self.receiver.start()
+        log.info(f"[CLIENTE] Sockets recriados. Sala '{self.session.sala}' mantida!")
 
     def stop(self):
         self.running = False

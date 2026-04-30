@@ -13,20 +13,25 @@ class Sender:
         self.broker_info = broker_info
         self.host = "localhost" # Simplificação
         
+        # Vídeo e áudio: PUB (não-bloqueante, perder frame é OK para mídia)
         self.v_sock = self.context.socket(zmq.PUB)
+        self.v_sock.setsockopt(zmq.SNDHWM, 2)  # Máx 2 frames em fila antes de descartar
         self.v_sock.connect(f"tcp://{self.host}:{broker_info['ports']['video_in']}")
         
         self.a_sock = self.context.socket(zmq.PUB)
+        self.a_sock.setsockopt(zmq.SNDHWM, 4)
         self.a_sock.connect(f"tcp://{self.host}:{broker_info['ports']['audio_in']}")
         
-        self.t_sock = self.context.socket(zmq.PUB)
+        # Texto: PUSH (confiável, não perde mensagens, mas com timeout para não bloquear)
+        self.t_sock = self.context.socket(zmq.PUSH)
+        self.t_sock.setsockopt(zmq.SNDTIMEO, 500)  # 500ms de timeout
+        self.t_sock.setsockopt(zmq.SNDHWM, 100)
         self.t_sock.connect(f"tcp://{self.host}:{broker_info['ports']['text_in']}")
         
         self.running = False
         self.sala = broker_info.get("sala", "A")
 
     def send_video(self, data):
-        # Tópico: sala
         self.v_sock.send_multipart([self.sala.encode(), data])
 
     def send_audio(self, data):
@@ -34,8 +39,6 @@ class Sender:
 
     def send_text(self, text, user_id):
         msg = f"{user_id}: {text}"
-        # QoS: Retry poderia ser implementado aqui se tivéssemos um canal de ACK
-        # Por enquanto, enviamos via PUB no tópico da sala
         self.t_sock.send_multipart([self.sala.encode(), msg.encode()])
         log.info(f"Texto enviado: {text}")
 

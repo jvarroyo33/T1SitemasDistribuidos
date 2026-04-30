@@ -44,15 +44,28 @@ class Broker:
             s.setsockopt(zmq.LINGER, 0)
             return s
 
-        # Usando SUB para receber de clientes e PUB para distribuir
-        self.v_in = create_socket(zmq.SUB); self.v_in.bind(f"tcp://*:{self.p_video_in}"); self.v_in.setsockopt(zmq.SUBSCRIBE, b"")
-        self.v_out = create_socket(zmq.PUB); self.v_out.bind(f"tcp://*:{self.p_video_out}")
+        # Vídeo/áudio: SUB (não-bloqueante, descarta se sobrecarregado)
+        self.v_in = create_socket(zmq.SUB)
+        self.v_in.setsockopt(zmq.RCVHWM, 4)  # Descarta frames antigos se acumular
+        self.v_in.bind(f"tcp://*:{self.p_video_in}")
+        self.v_in.setsockopt(zmq.SUBSCRIBE, b"")
+        self.v_out = create_socket(zmq.PUB)
+        self.v_out.setsockopt(zmq.SNDHWM, 4)
+        self.v_out.bind(f"tcp://*:{self.p_video_out}")
         
-        self.a_in = create_socket(zmq.SUB); self.a_in.bind(f"tcp://*:{self.p_audio_in}"); self.a_in.setsockopt(zmq.SUBSCRIBE, b"")
-        self.a_out = create_socket(zmq.PUB); self.a_out.bind(f"tcp://*:{self.p_audio_out}")
+        self.a_in = create_socket(zmq.SUB)
+        self.a_in.setsockopt(zmq.RCVHWM, 8)
+        self.a_in.bind(f"tcp://*:{self.p_audio_in}")
+        self.a_in.setsockopt(zmq.SUBSCRIBE, b"")
+        self.a_out = create_socket(zmq.PUB)
+        self.a_out.setsockopt(zmq.SNDHWM, 8)
+        self.a_out.bind(f"tcp://*:{self.p_audio_out}")
         
-        self.t_in = create_socket(zmq.SUB); self.t_in.bind(f"tcp://*:{self.p_text_in}"); self.t_in.setsockopt(zmq.SUBSCRIBE, b"")
-        self.t_out = create_socket(zmq.PUB); self.t_out.bind(f"tcp://*:{self.p_text_out}")
+        # Texto: PULL (confiável, entrega garantida)
+        self.t_in = create_socket(zmq.PULL)
+        self.t_in.bind(f"tcp://*:{self.p_text_in}")
+        self.t_out = create_socket(zmq.PUB)
+        self.t_out.bind(f"tcp://*:{self.p_text_out}")
 
         self.control = create_socket(zmq.REP); self.control.bind(f"tcp://*:{self.p_control}")
         self.inter = create_socket(zmq.ROUTER); self.inter.bind(f"tcp://*:{self.p_inter}")
@@ -123,16 +136,19 @@ class Broker:
                         self.control.send_json({"status": "ok"})
                     else:
                         self.control.send_json({"status": "error"})
-            except zmq.ZMQError: break
+            except zmq.ZMQError:
+                continue  # Não deixa um erro isolado matar a thread de controle
 
     def _registry_sync_loop(self):
-        reg_sock = self.context.socket(zmq.REQ)
-        reg_sock.setsockopt(zmq.LINGER, 0)
-        reg_sock.setsockopt(zmq.RCVTIMEO, 2000)
-        reg_sock.connect(self.registry_addr)
         my_addr = f"{self.host}:{self.base_port}"
         
         while self.running:
+            # Recria o socket REQ a cada ciclo para evitar trava de estado (send/recv dessincronizados)
+            reg_sock = self.context.socket(zmq.REQ)
+            reg_sock.setsockopt(zmq.LINGER, 0)
+            reg_sock.setsockopt(zmq.RCVTIMEO, 2000)
+            reg_sock.setsockopt(zmq.SNDTIMEO, 2000)
+            reg_sock.connect(self.registry_addr)
             try:
                 reg_sock.send_json({"action": "register", "address": my_addr})
                 reg_sock.recv_json()
@@ -148,9 +164,21 @@ class Broker:
                                 p_inter_port = int(p_base) + 8
                                 dealer = self.context.socket(zmq.DEALER)
                                 dealer.setsockopt(zmq.LINGER, 0)
+                                dealer.setsockopt(zmq.SNDTIMEO, 100)  # 100ms: nunca bloqueia em peer morto
+                                dealer.setsockopt(zmq.SNDHWM, 10)     # Descarta rápido se fila encher
                                 dealer.connect(f"tcp://{p_host}:{p_inter_port}")
                                 self.peers[b_addr] = dealer
-            except: pass
+                    # Remove peers que não estão mais no registry (broker morto)
+                    with self._lock:
+                        dead = [addr for addr in self.peers if addr not in active_brokers and addr != my_addr]
+                        for addr in dead:
+                            self.log.info(f"Removendo peer inativo: {addr}")
+                            self.peers[addr].close()
+                            del self.peers[addr]
+            except Exception:
+                pass  # Erro isolado nao para o loop de registro
+            finally:
+                reg_sock.close()  # Sempre fecha para liberar recursos
             time.sleep(2)
 
     def start(self):

@@ -36,6 +36,8 @@ class CaptureManager:
         self.audio_q   = audio_queue
         self._running  = False
         self._threads  = []
+        self.video_enabled = True
+        self.audio_enabled = True
 
     # ------------------------------------------------------------------
     # Vídeo
@@ -45,45 +47,47 @@ class CaptureManager:
             return
             
         import os
-        os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0" # Silencia avisos internos do OpenCV
+        os.environ["OPENCV_VIDEOIO_LOG_LEVEL"] = "0"
         
-        cap = cv2.VideoCapture(0)
-        camera_error = False
+        cap = None
         
-        if not cap.isOpened():
-            log.warning("[CAPTURE] Câmera em uso ou não encontrada. Usando placeholder.")
-            camera_error = True
-        
-        log.info("[CAPTURE] Thread de vídeo iniciada")
-        
-        # Frame de fallback caso a câmera esteja ocupada
+        # Frames de fallback
         placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
         cv2.putText(placeholder, "Camera em uso / Bloqueada", (100, 240), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        
+        disabled_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(disabled_frame, "Camera Desativada", (150, 240), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        error_count = 0
         while self._running:
-            if not camera_error:
-                ok, frame = cap.read()
-                if not ok:
-                    error_count += 1
-                    if error_count > 10: # Se falhar muito, desiste e usa placeholder
-                        camera_error = True
-                        cap.release()
-                    time.sleep(0.1)
-                    continue
-                error_count = 0
+            if not self.video_enabled:
+                if cap:
+                    cap.release()
+                    cap = None
+                frame = disabled_frame
+                time.sleep(0.1)
             else:
-                frame = placeholder
-                time.sleep(0.1) # Reduz CPU para o placeholder
+                if cap is None:
+                    cap = cv2.VideoCapture(0)
+                    if not cap.isOpened():
+                        cap = None # Falha ao abrir
+                
+                if cap:
+                    ok, frame = cap.read()
+                    if not ok:
+                        cap.release()
+                        cap = None
+                        frame = placeholder
+                    # Sucesso!
+                else:
+                    frame = placeholder
+                    time.sleep(0.1)
 
             try:
-                # QoS Adaptativo
                 q_size = self.video_q.qsize()
                 quality = 15 if q_size > 7 else (30 if q_size > 4 else 60)
-                
                 data = encode_frame(frame, quality=quality)
-                
                 if self.video_q.full():
                     try: self.video_q.get_nowait()
                     except: pass
@@ -91,7 +95,7 @@ class CaptureManager:
             except Exception as e:
                 log.error(f"[CAPTURE] Erro vídeo: {e}")
                 
-        if cap.isOpened():
+        if cap:
             cap.release()
         log.info("[CAPTURE] Thread de vídeo encerrada")
 
@@ -101,31 +105,53 @@ class CaptureManager:
     def _capture_audio(self):
         if not AUDIO_OK:
             return
+        
         pa = pyaudio.PyAudio()
-        try:
-            stream = pa.open(
-                format=pyaudio.paInt16,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-            )
-            log.info("[CAPTURE] Microfone iniciado")
-            while self._running:
-                try:
-                    pcm = stream.read(CHUNK, exception_on_overflow=False)
-                    if self.audio_q.full():
-                        try: self.audio_q.get_nowait()
-                        except: pass
-                    self.audio_q.put_nowait(pcm)
-                except Exception as e:
-                    log.error(f"[CAPTURE] Erro áudio: {e}")
+        stream = None
+        
+        while self._running:
+            if not self.audio_enabled:
+                if stream:
+                    stream.stop_stream()
+                    stream.close()
+                    stream = None
+                # Envia silêncio
+                pcm = b'\x00' * (CHUNK * 2) 
+                time.sleep(CHUNK / RATE)
+            else:
+                if stream is None:
+                    try:
+                        stream = pa.open(
+                            format=pyaudio.paInt16,
+                            channels=CHANNELS,
+                            rate=RATE,
+                            input=True,
+                            frames_per_buffer=CHUNK,
+                        )
+                    except:
+                        stream = None
+                
+                if stream:
+                    try:
+                        pcm = stream.read(CHUNK, exception_on_overflow=False)
+                    except:
+                        pcm = b'\x00' * (CHUNK * 2)
+                else:
+                    pcm = b'\x00' * (CHUNK * 2)
+                    time.sleep(0.1)
+
+            try:
+                if self.audio_q.full():
+                    try: self.audio_q.get_nowait()
+                    except: pass
+                self.audio_q.put_nowait(pcm)
+            except Exception as e:
+                log.error(f"[CAPTURE] Erro áudio: {e}")
+                
+        if stream:
             stream.stop_stream()
             stream.close()
-        except Exception as e:
-            log.error(f"[CAPTURE] Erro ao abrir microfone: {e}")
-        finally:
-            pa.terminate()
+        pa.terminate()
         log.info("[CAPTURE] Microfone encerrado")
 
     # ------------------------------------------------------------------
