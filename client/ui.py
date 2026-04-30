@@ -57,15 +57,17 @@ class UI:
         
         while self._running:
             try:
-                frame = self.video_q.get(timeout=1)
+                frame = self.video_q.get(timeout=0.05)
                 self._draw_controls(frame)
                 cv2.imshow(self.win_name, frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
             except queue.Empty:
-                continue
+                pass
             except Exception as e:
                 log.error(f"[UI] Erro render: {e}")
+                break
+                
+            # OpenCV EXIGE que o waitKey seja chamado para não dar "Não responde"
+            if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         cv2.destroyAllWindows()
 

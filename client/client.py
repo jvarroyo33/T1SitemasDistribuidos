@@ -74,7 +74,8 @@ class VideoConferenceClient:
         threading.Thread(target=self._send_loop, daemon=True).start()
         log.info("Cliente iniciado com sucesso!")
         
-        self.ui.start() # Bloqueia aqui
+        threading.Thread(target=self.terminal_chat_loop, daemon=True).start()
+        self.ui.start() # Bloqueia aqui na Main Thread
 
     def _on_ui_close(self):
         self.stop()
@@ -92,11 +93,16 @@ class VideoConferenceClient:
                 log.error(f"[CLIENTE] Erro no send_loop: {e}")
             import time
             time.sleep(0.01)
+
     def on_video_received(self, data):
         self.ui.add_video_frame(data)
 
     def on_audio_received(self, data):
-        self.ui.play_audio(data)
+        if self.audio_stream:
+            try:
+                self.audio_stream.write(data)
+            except Exception as e:
+                log.error(f"Erro audio playback: {e}")
 
     def on_text_received(self, msg):
         self.ui.add_chat_message(msg)
@@ -119,7 +125,6 @@ class VideoConferenceClient:
         self.stop()
 
     def run_interactive(self):
-        threading.Thread(target=self.terminal_chat_loop, daemon=True).start()
         try:
             self.start()
         except KeyboardInterrupt:
