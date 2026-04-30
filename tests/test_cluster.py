@@ -31,12 +31,12 @@ def test_inter_broker_routing():
     sub.connect("tcp://localhost:8006")
     sub.setsockopt(zmq.SUBSCRIBE, b"SALA_TESTE")
     
-    # 3. Configurar Publisher no Broker A (Base 7000 -> Texto In = 7005)
-    pub = context.socket(zmq.PUB)
-    pub.setsockopt(zmq.LINGER, 0)
-    pub.connect("tcp://localhost:7005")
+    # 3. Configurar PUSH no Broker A (Base 7000 -> Texto In = 7005)
+    push = context.socket(zmq.PUSH)
+    push.setsockopt(zmq.LINGER, 0)
+    push.connect("tcp://localhost:7005")
     
-    # Tempo para o handshake PUB/SUB e ROUTER/DEALER estabilizar
+    # Tempo para o handshake PULL/PUSH e ROUTER/DEALER estabilizar
     time.sleep(3)
     
     received_msgs = []

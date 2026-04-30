@@ -71,7 +71,7 @@ class UI:
 
     def start(self):
         self._running = True
-        threading.Thread(target=self._render_loop, daemon=True).start()
+        self._render_loop()
 
     def stop(self):
         self._running = False

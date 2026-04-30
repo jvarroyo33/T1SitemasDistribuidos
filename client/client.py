@@ -119,11 +119,9 @@ class VideoConferenceClient:
         self.stop()
 
     def run_interactive(self):
-        self.start()
-        if not self.running:
-            return
+        threading.Thread(target=self.terminal_chat_loop, daemon=True).start()
         try:
-            self.terminal_chat_loop()
+            self.start()
         except KeyboardInterrupt:
             pass
         finally:
