@@ -133,5 +133,5 @@ pip install -r requirements.txt
    - Use o terminal para digitar mensagens. Digite `/sair` para encerrar.
 
 ---
-**Equipe**: Enzo Dezem Alves RA: 801743 , Joao Vitor T. Arroyo 814135 ,....
+**Equipe**: Enzo Dezem Alves RA: 801743 , Joao Vitor T. Arroyo 814135 ,João Lucas Gomes Pelegrino  RA: 822033,Felipe  Penteado - 831439, Levir de Oliveira - 790285
 **Data**: 30/04/2026
